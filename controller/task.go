@@ -161,7 +161,10 @@ func writeImageTaskStatus(c *gin.Context, task *model.Task, createdAt int64) {
 		}
 	case model.TaskStatusFailure:
 		status = "failed"
-		message = "图片生成失败，请稍后重试"
+		message = task.FailReason
+		if message == "" {
+			message = "图片生成失败，请稍后重试"
+		}
 	case model.TaskStatusRejected:
 		status = "rejected"
 		message = service.TaskContentRejectedMessage
@@ -487,7 +490,8 @@ func TaskArtifactContent(c *gin.Context) {
 		writeTaskArtifactError(c, http.StatusGone, "artifact_expired", "图片已过期，请重新生成")
 		return
 	}
-	if task.PrivateData.ImageTask && !service.GetTaskArtifactStore().Enabled() {
+	artifactStore := service.GetTaskArtifactStore()
+	if task.PrivateData.ImageTask && !artifactStore.Enabled() {
 		writeTaskArtifactError(c, http.StatusBadGateway, "media_delivery_failed", "媒体交付失败")
 		return
 	}
@@ -506,6 +510,16 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 		return
 	}
+	// A signed capability has already bound the request to this task and key.
+	// Serve a persisted artifact before running the plugin projection, which can
+	// execute JavaScript and re-parse the upstream task snapshot on every GET.
+	if middleware.IsTaskArtifactAccess(c) {
+		if ref, resolveErr := artifactStore.Resolve(task, artifactKey); resolveErr == nil && ref != nil {
+			if serveErr := artifactStore.Serve(c, task, ref); serveErr == nil {
+				return
+			}
+		}
+	}
 	c.Set("task_artifact_cache_key", artifactKey)
 	artifacts, err := projectTaskArtifacts(task)
 	if err != nil {
@@ -523,7 +537,6 @@ func TaskArtifactContent(c *gin.Context) {
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
-	artifactStore := service.GetTaskArtifactStore()
 	if ref, resolveErr := artifactStore.Resolve(task, artifactKey); resolveErr == nil && ref != nil {
 		_ = artifactStore.Serve(c, task, ref)
 		return

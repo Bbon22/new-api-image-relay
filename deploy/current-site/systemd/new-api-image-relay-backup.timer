@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily New API PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

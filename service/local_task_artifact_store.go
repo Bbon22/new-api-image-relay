@@ -184,7 +184,11 @@ func (s *localArtifactStore) Serve(c *gin.Context, task *model.Task, ref *Stored
 	if err != nil {
 		return err
 	}
-	c.Header("Cache-Control", "private, no-store")
+	expiresAt := time.Time{}
+	if task.PrivateData.ResultExpiresAt > 0 {
+		expiresAt = time.Unix(task.PrivateData.ResultExpiresAt, 0)
+	}
+	c.Header("Cache-Control", hostedArtifactCacheControl(expiresAt))
 	c.Header("Content-Type", ref.MimeType)
 	http.ServeContent(c.Writer, c.Request, filepath.Base(ref.ObjectKey), info.ModTime(), file)
 	return nil

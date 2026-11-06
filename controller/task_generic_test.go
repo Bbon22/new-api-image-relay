@@ -127,7 +127,7 @@ func TestGetImageTaskReturnsAsyncHostedURL(t *testing.T) {
 	task.PrivateData = model.TaskPrivateData{
 		ImageTask:           true,
 		MediaDeliveryStatus: "succeeded",
-		ResultURL:           "https://relay.example.test/v1/images/relay/local/image/content?access=valid",
+		ResultURL:           "https://zmw.bon2.space/v1/images/relay/local/image/content?access=valid",
 		ResultExpiresAt:     time.Now().Add(time.Hour).Unix(),
 	}
 	require.NoError(t, model.DB.Save(task).Error)

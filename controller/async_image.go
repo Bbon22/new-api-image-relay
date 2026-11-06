@@ -379,11 +379,12 @@ func runAsyncImageTask(taskID string) {
 			return
 		}
 	}
-	if bytes.Contains(responseBody, []byte(service.TaskContentRejectedMessage)) || recorder.Code == http.StatusBadRequest {
+	if service.IsRelayImageContentRejected(recorder.Code, responseBody) || bytes.Contains(responseBody, []byte(service.TaskContentRejectedMessage)) {
 		finishAsyncImageTask(task, model.TaskStatusRejected, responseBody, nil)
 		return
 	}
-	finishAsyncImageTask(task, model.TaskStatusFailure, responseBody, errors.New("image generation failed"))
+	message := service.RelayImageUpstreamErrorMessage(recorder.Code, responseBody)
+	finishAsyncImageTask(task, model.TaskStatusFailure, responseBody, errors.New(message))
 }
 
 type nativeImageTaskResponse struct {
@@ -442,7 +443,8 @@ func runNativeAsyncImageTask(ctx context.Context, task *model.Task) (bool, error
 			return false, nil
 		}
 		task.PrivateData.FailureClass = model.TaskFailureClassUpstream
-		return true, errors.New("native image task submission failed")
+		message := service.RelayImageUpstreamErrorMessage(response.StatusCode, body, channel.GetBaseURL())
+		return true, errors.New(message)
 	}
 	var submitted nativeImageTaskResponse
 	if err := common.Unmarshal(body, &submitted); err != nil || strings.TrimSpace(submitted.ID) == "" {
@@ -570,6 +572,10 @@ func nativeAsyncImageRequest(ctx context.Context, task *model.Task, path, method
 
 func pollNativeAsyncImageTask(ctx context.Context, task *model.Task) error {
 	deadline := time.Now().Add(asyncImageTimeout)
+	upstreamURL := ""
+	if channel, err := model.CacheGetChannel(task.ChannelId); err == nil && channel != nil {
+		upstreamURL = channel.GetBaseURL()
+	}
 	for {
 		if time.Now().After(deadline) {
 			return errors.New("native image task polling timed out")
@@ -586,7 +592,7 @@ func pollNativeAsyncImageTask(ctx context.Context, task *model.Task) error {
 				finishAsyncImageTask(task, model.TaskStatusRejected, nil, nil)
 			} else {
 				task.PrivateData.FailureClass = model.TaskFailureClassUpstream
-				return errors.New("native image task query failed")
+				return errors.New(service.RelayImageUpstreamErrorMessage(response.StatusCode, body, upstreamURL))
 			}
 			return nil
 		}
@@ -606,7 +612,8 @@ func pollNativeAsyncImageTask(ctx context.Context, task *model.Task) error {
 				finishAsyncImageTask(task, model.TaskStatusRejected, nil, nil)
 			} else {
 				task.PrivateData.FailureClass = model.TaskFailureClassUpstream
-				finishAsyncImageTask(task, model.TaskStatusFailure, nil, errors.New("native image task failed"))
+				message := service.RelayImageUpstreamErrorMessage(response.StatusCode, body, upstreamURL)
+				finishAsyncImageTask(task, model.TaskStatusFailure, nil, errors.New(message))
 			}
 			return nil
 		default:
@@ -924,6 +931,11 @@ func finishAsyncImageTask(task *model.Task, status model.TaskStatus, responseBod
 		task.PrivateData.MediaDeliveryStatus = "failed"
 	case model.TaskStatusFailure:
 		task.FailReason = "图片生成失败，请稍后重试"
+		if runErr != nil {
+			if message := service.SanitizeRelayImageErrorMessage(runErr.Error()); message != "" {
+				task.FailReason = message
+			}
+		}
 		task.PrivateData.SettlementStatus = "failed"
 		task.PrivateData.MediaDeliveryStatus = "failed"
 		if runErr != nil {

@@ -1,0 +1,9 @@
+[Unit]
+Description=Back up New API PostgreSQL database
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=APP_DIR=/opt/new-api/deploy/current-site
+ExecStart=/opt/new-api/deploy/current-site/scripts/backup-postgres.sh

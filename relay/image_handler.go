@@ -157,7 +157,8 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 				if service.IsRelayImageContentRejected(httpResp.StatusCode, body) {
 					return imagePlatformError(service.TaskContentRejectedMessage, types.ErrorCodePromptBlocked, http.StatusBadRequest, true, types.ErrOptionWithNoRefund())
 				}
-				return imagePlatformError("当前生成服务繁忙，请稍后重试", types.ErrorCodeDoRequestFailed, http.StatusBadGateway, true)
+				message := service.RelayImageUpstreamErrorMessage(httpResp.StatusCode, body, common.UpstreamAddresses(c)...)
+				return imagePlatformError(message, types.ErrorCodeDoRequestFailed, http.StatusBadGateway, true)
 			}
 		}
 	}

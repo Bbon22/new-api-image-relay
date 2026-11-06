@@ -1,10 +1,13 @@
 package service
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -34,7 +37,7 @@ func TestDisabledTaskArtifactStoreHasNoStorageBehavior(t *testing.T) {
 
 func TestLocalArtifactStoreRejectsInvalidImageBeforeCreatingTaskDirectory(t *testing.T) {
 	root := t.TempDir()
-	store := newLocalArtifactStore(root)
+	store := newLocalArtifactStore(root).(*localArtifactStore)
 	task := &model.Task{TaskID: "task-invalid-image", PrivateData: model.TaskPrivateData{ImageTask: true}}
 
 	ref, err := store.Persist(t.Context(), task, types.TaskArtifact{Key: "image-1", Type: "image"}, strings.NewReader("not an image"))
@@ -42,6 +45,34 @@ func TestLocalArtifactStoreRejectsInvalidImageBeforeCreatingTaskDirectory(t *tes
 	assert.Error(t, err)
 	_, statErr := os.Stat(filepath.Join(root, task.TaskID))
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestLocalArtifactStoreServesWithExpiryBoundedPrivateCache(t *testing.T) {
+	root := t.TempDir()
+	store := newLocalArtifactStore(root).(*localArtifactStore)
+	task := &model.Task{
+		TaskID: "task-cached-image",
+		PrivateData: model.TaskPrivateData{
+			ResultExpiresAt: time.Now().Add(10 * time.Minute).Unix(),
+		},
+	}
+	path := store.artifactPath(task.TaskID, "image-1")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
+	require.NoError(t, os.WriteFile(path, []byte("image-bytes"), 0o640))
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/image", nil)
+	require.NoError(t, store.Serve(c, task, &StoredArtifactRef{
+		Backend:   "local",
+		ObjectKey: path,
+		MimeType:  "image/png",
+	}))
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "image/png", recorder.Header().Get("Content-Type"))
+	assert.Contains(t, recorder.Header().Get("Cache-Control"), "private, max-age=")
+	assert.NotContains(t, recorder.Header().Get("Cache-Control"), "no-store")
 }
 
 var _ TaskArtifactStore = disabledArtifactStore{}

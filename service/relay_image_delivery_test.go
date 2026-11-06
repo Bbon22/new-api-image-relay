@@ -39,7 +39,7 @@ func TestRelayImageDeliveryRewritesURLToExpiringLocalArtifact(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", upstream.Client())
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", upstream.Client())
 	body, err := json.Marshal(map[string]any{"data": []any{map[string]any{"url": upstream.URL + "/generated.png"}}})
 	require.NoError(t, err)
 	rewritten, err := store.RewriteResponse(context.Background(), body, "application/json")
@@ -55,7 +55,7 @@ func TestRelayImageDeliveryRewritesURLToExpiringLocalArtifact(t *testing.T) {
 	require.Len(t, result.Data, 1)
 	parsed, err := url.Parse(result.Data[0].URL)
 	require.NoError(t, err)
-	assert.Equal(t, "relay.example.test", parsed.Host)
+	assert.Equal(t, "zmw.bon2.space", parsed.Host)
 	assert.Contains(t, parsed.Path, "/v1/images/relay/")
 
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
@@ -68,6 +68,8 @@ func TestRelayImageDeliveryRewritesURLToExpiringLocalArtifact(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, parsed.RequestURI(), nil)
 	require.NoError(t, store.Serve(c, id, relayImageArtifactKey))
 	assert.Equal(t, "image/png", recorder.Header().Get("Content-Type"))
+	assert.Contains(t, recorder.Header().Get("Cache-Control"), "private, max-age=")
+	assert.NotContains(t, recorder.Header().Get("Cache-Control"), "no-store")
 	assert.Equal(t, imageBytes, recorder.Body.Bytes())
 
 	old := time.Now().Add(-relayImageRetention - time.Minute)
@@ -85,7 +87,7 @@ func TestRelayImageReferenceUsesReferenceCapabilityAndRetention(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	imageBytes := testRelayPNG(t)
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", nil)
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", nil)
 	referenceURL, err := store.persistWithPolicy(imageBytes, relayImageReferenceKey, relayImageReferenceRetention, relayImageReferencePrefix)
 	require.NoError(t, err)
 	parsed, err := url.Parse(referenceURL)
@@ -122,7 +124,7 @@ func TestRelayImageDeliveryPrefersURLOverBase64(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", upstream.Client())
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", upstream.Client())
 	body := []byte(`{"data":[{"url":"` + upstream.URL + `/generated.png","b64_json":"not-valid-base64"}]}`)
 	rewritten, err := store.RewriteResponse(context.Background(), body, "application/json")
 	require.NoError(t, err)
@@ -141,7 +143,7 @@ func TestRelayImageDeliveryFallsBackToBase64WhenURLIsSlow(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", upstream.Client())
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", upstream.Client())
 	encoded := base64.StdEncoding.EncodeToString(imageBytes)
 	body := []byte(`{"data":[{"url":"` + upstream.URL + `/generated.png","b64_json":"` + encoded + `"}]}`)
 	started := time.Now()
@@ -161,7 +163,7 @@ func TestRelayImageDeliveryIgnoresInvalidURLWhenBase64IsValid(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", upstream.Client())
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", upstream.Client())
 	encoded := base64.StdEncoding.EncodeToString(imageBytes)
 	body := []byte(`{"data":[{"url":"` + upstream.URL + `/invalid.png","b64_json":"` + encoded + `"}]}`)
 	rewritten, err := store.RewriteResponse(context.Background(), body, "application/json")
@@ -177,7 +179,7 @@ func TestRelayImageDeliveryFallsBackToBase64WhenURLFails(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", upstream.Client())
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", upstream.Client())
 	encoded := base64.StdEncoding.EncodeToString(imageBytes)
 	body := []byte(`{"data":[{"url":"` + upstream.URL + `/generated.png","b64_json":"` + encoded + `"}]}`)
 	rewritten, err := store.RewriteResponse(context.Background(), body, "application/json")
@@ -191,7 +193,7 @@ func TestRelayImageDeliveryFailureNeverReturnsUpstreamURL(t *testing.T) {
 		http.Error(w, "upstream temporary download error", http.StatusBadGateway)
 	}))
 	defer server.Close()
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", server.Client())
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", server.Client())
 
 	body := []byte(`{"data":[{"url":"` + server.URL + `/image.png"}]}`)
 	rewritten, err := store.RewriteResponse(context.Background(), body, "application/json")
@@ -209,7 +211,7 @@ func TestRelayImageDownloadRetriesOnlyTransientFailures(t *testing.T) {
 		}))
 		defer server.Close()
 
-		store := newRelayImageStore(t.TempDir(), "https://relay.example.test", server.Client())
+		store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", server.Client())
 		_, err := store.downloadImageWithRetry(context.Background(), server.URL+"/missing.png")
 		require.Error(t, err)
 		assert.EqualValues(t, 1, requests.Load())
@@ -228,7 +230,7 @@ func TestRelayImageDownloadRetriesOnlyTransientFailures(t *testing.T) {
 		}))
 		defer server.Close()
 
-		store := newRelayImageStore(t.TempDir(), "https://relay.example.test", server.Client())
+		store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", server.Client())
 		got, err := store.downloadImageWithRetry(context.Background(), server.URL+"/image.png")
 		require.NoError(t, err)
 		assert.Equal(t, imageBytes, got)
@@ -242,14 +244,14 @@ func TestRelayImageDeliveryRewritesSSEImageEventsOnly(t *testing.T) {
 	t.Cleanup(func() { common.CryptoSecret = previousSecret })
 	imageBytes := testRelayPNG(t)
 	encoded := base64.StdEncoding.EncodeToString(imageBytes)
-	store := newRelayImageStore(t.TempDir(), "https://relay.example.test", nil)
+	store := newRelayImageStore(t.TempDir(), "https://zmw.bon2.space", nil)
 
 	input := []byte("event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"" + encoded + "\"}\n\ndata: [DONE]\n\n")
 	output, err := store.RewriteResponse(context.Background(), input, "text/event-stream")
 	require.NoError(t, err)
 	assert.Contains(t, string(output), "event: image_generation.completed")
 	assert.Contains(t, string(output), "data: [DONE]")
-	assert.Contains(t, string(output), "https://relay.example.test/v1/images/relay/")
+	assert.Contains(t, string(output), "https://zmw.bon2.space/v1/images/relay/")
 	assert.NotContains(t, string(output), "b64_json")
 	assert.NotContains(t, string(output), "upstream")
 }
@@ -262,6 +264,29 @@ func TestRelayImageErrorClassificationAndPreAcceptanceRetryScope(t *testing.T) {
 	assert.True(t, IsRelayImagePreAcceptanceConnectionError(&os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}))
 	assert.False(t, IsRelayImagePreAcceptanceConnectionError(context.DeadlineExceeded))
 	assert.False(t, IsRelayImagePreAcceptanceConnectionError(io.EOF))
+}
+
+func TestRelayImageUpstreamErrorMessagePreservesReasonAndRedactsSensitiveData(t *testing.T) {
+	body := []byte(`{"error":{"message":"请求包含当前服务不支持的参数。查看 https://api.vendor.example/v1?access=secret Authorization: Bearer abc123 api_key:xyz sk-12345678901234567890"}}`)
+	message := RelayImageUpstreamErrorMessage(http.StatusBadRequest, body, "https://api.vendor.example")
+
+	assert.Contains(t, message, "请求包含当前服务不支持的参数")
+	assert.Contains(t, message, "[链接已隐藏]")
+	assert.Contains(t, message, "Bearer ***")
+	assert.Contains(t, message, "api_key=***")
+	assert.Contains(t, message, "sk-***")
+	assert.NotContains(t, message, "vendor.example")
+	assert.NotContains(t, message, "secret")
+	assert.NotContains(t, message, "abc123")
+	assert.NotContains(t, message, "xyz")
+}
+
+func TestRelayImageUpstreamErrorMessageSupportsPlainProviderMessageAndFallback(t *testing.T) {
+	assert.Equal(t,
+		"请求包含当前服务不支持的参数",
+		RelayImageUpstreamErrorMessage(http.StatusBadRequest, []byte(`{"message":"请求包含当前服务不支持的参数"}`)),
+	)
+	assert.Equal(t, "图片生成失败（HTTP 502）", RelayImageUpstreamErrorMessage(http.StatusBadGateway, []byte(`<html>gateway error</html>`)))
 }
 
 func testRelayPNG(t *testing.T) []byte {

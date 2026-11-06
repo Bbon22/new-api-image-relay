@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 
@@ -38,6 +39,22 @@ type TaskArtifactStore interface {
 var ErrTaskArtifactStoreDisabled = errors.New("task artifact store is disabled")
 var ErrImageTaskDeliveryHandlerUnavailable = errors.New("image task delivery handler is unavailable")
 var ErrImageTaskDeliveryInProgress = errors.New("image task media delivery is in progress")
+
+const hostedArtifactCacheMaxAge int64 = 3600
+
+func hostedArtifactCacheControl(expiresAt time.Time) string {
+	maxAge := hostedArtifactCacheMaxAge
+	if !expiresAt.IsZero() {
+		remaining := int64(time.Until(expiresAt).Seconds())
+		if remaining < maxAge {
+			maxAge = remaining
+		}
+	}
+	if maxAge < 1 {
+		maxAge = 1
+	}
+	return "private, max-age=" + strconv.FormatInt(maxAge, 10)
+}
 
 const (
 	imageTaskDeliveryWorkerCount = 64

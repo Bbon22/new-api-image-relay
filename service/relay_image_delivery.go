@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,8 +26,12 @@ import (
 )
 
 const (
-	relayImageRetention                = 9 * time.Hour
-	relayImageReferenceRetention       = 2 * time.Hour
+	relayImageRetention = 9 * time.Hour
+	// Customer-supplied reference media is only needed while the upstream
+	// image-edit request is being submitted. Keep it short-lived so these
+	// temporary inputs are removed promptly; generated artifacts retain their
+	// separate 9-hour policy above.
+	relayImageReferenceRetention       = 8 * time.Minute
 	relayImageMaxBytes           int64 = 8 << 20
 	relayImageReferenceMaxBytes  int64 = 4 << 20
 	relayImageMaxResponse              = 128 << 20
@@ -37,7 +42,7 @@ const (
 	// When an upstream includes both URL and Base64, let the URL lead briefly,
 	// then race the local decode against the URL. The first valid representation
 	// wins, so a fixed fallback timeout cannot make delivery slower.
-	relayImageBase64RaceDelay        = 250 * time.Millisecond
+	relayImageBase64RaceDelay = 250 * time.Millisecond
 	// Provider image URLs can be served from a cold CDN edge. Keep enough
 	// budget for a full 8 MB artifact while still bounding a dead URL.
 	relayImageDownloadAttemptTimeout = 20 * time.Second
@@ -48,6 +53,10 @@ var (
 	ErrRelayImageDeliveryFailed = errors.New("image media delivery failed")
 	ErrRelayImageRejected       = errors.New("image generation rejected")
 	ErrRelayImageGeneration     = errors.New("image generation failed")
+	relayImageErrorURLPattern   = regexp.MustCompile(`(?i)(?:https?|wss?)://[^\s"'<>]+`)
+	relayImageBearerPattern     = regexp.MustCompile(`(?i)\bbearer\s+[^\s,;]+`)
+	relayImageAPIKeyPattern     = regexp.MustCompile(`(?i)\bapi[_-]?key\s*[:=]\s*[^\s,;]+`)
+	relayImageSecretKeyPattern  = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}\b`)
 
 	relayImageStoreOnce sync.Once
 	relayImageStoreInst *relayImageStore
@@ -575,6 +584,90 @@ func IsRelayImageContentRejected(statusCode int, body []byte) bool {
 	return IsTaskContentRejection("", statusCode, body)
 }
 
+// RelayImageUpstreamErrorMessage exposes only a provider's human-readable
+// reason, never its raw response body. URLs and common credential forms are
+// removed before the message is returned to an image API client.
+func RelayImageUpstreamErrorMessage(statusCode int, body []byte, upstreamURLs ...string) string {
+	var response struct {
+		Error    json.RawMessage `json:"error"`
+		Message  string          `json:"message"`
+		Msg      string          `json:"msg"`
+		Err      string          `json:"err"`
+		ErrorMsg string          `json:"error_msg"`
+		Detail   string          `json:"detail"`
+		Header   struct {
+			Message string `json:"message"`
+		} `json:"header"`
+		Response struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		} `json:"response"`
+	}
+
+	if common.Unmarshal(body, &response) == nil {
+		message := response.Message
+		if message == "" && len(response.Error) > 0 {
+			switch common.GetJsonType(response.Error) {
+			case "object":
+				var nested struct {
+					Message string `json:"message"`
+				}
+				_ = common.Unmarshal(response.Error, &nested)
+				message = nested.Message
+			case "string":
+				_ = common.Unmarshal(response.Error, &message)
+			}
+		}
+		if message == "" {
+			message = response.Msg
+		}
+		if message == "" {
+			message = response.Err
+		}
+		if message == "" {
+			message = response.ErrorMsg
+		}
+		if message == "" {
+			message = response.Detail
+		}
+		if message == "" {
+			message = response.Header.Message
+		}
+		if message == "" {
+			message = response.Response.Error.Message
+		}
+		if message != "" {
+			return sanitizeRelayImageErrorMessage(message, upstreamURLs...)
+		}
+	}
+
+	if statusCode >= http.StatusBadRequest && statusCode <= 599 {
+		return fmt.Sprintf("图片生成失败（HTTP %d）", statusCode)
+	}
+	return "图片生成失败，请稍后重试"
+}
+
+// SanitizeRelayImageErrorMessage is also used for already-extracted error
+// messages stored on asynchronous task records.
+func SanitizeRelayImageErrorMessage(message string, upstreamURLs ...string) string {
+	return sanitizeRelayImageErrorMessage(message, upstreamURLs...)
+}
+
+func sanitizeRelayImageErrorMessage(message string, upstreamURLs ...string) string {
+	message = common.MaskSensitiveInfo(message, upstreamURLs...)
+	message = relayImageErrorURLPattern.ReplaceAllString(message, "[链接已隐藏]")
+	message = relayImageBearerPattern.ReplaceAllString(message, "Bearer ***")
+	message = relayImageAPIKeyPattern.ReplaceAllString(message, "api_key=***")
+	message = relayImageSecretKeyPattern.ReplaceAllString(message, "sk-***")
+	message = strings.Join(strings.Fields(message), " ")
+	message = strings.TrimSpace(message)
+	if len([]rune(message)) > 512 {
+		message = string([]rune(message)[:512])
+	}
+	return message
+}
+
 // IsRelayImagePreAcceptanceConnectionError limits image-generation retries to
 // transport failures that occur before an HTTP response is received.
 func IsRelayImagePreAcceptanceConnectionError(err error) bool {
@@ -872,7 +965,7 @@ func (s *relayImageStore) Serve(c *gin.Context, id, artifactKey string) error {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	c.Header("Cache-Control", "private, no-store")
+	c.Header("Cache-Control", hostedArtifactCacheControl(info.ModTime().Add(retention)))
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Type", mimeType)
 	c.Header("Content-Disposition", "inline")

@@ -6,8 +6,6 @@
 
 **An AI gateway for models, applications, and agents**
 
-This repository also includes image relay extensions for synchronous and asynchronous image generation. See the [image relay quick start](./IMAGE_RELAY_QUICKSTART.md) for source-based deployment and API usage.
-
 <p align="center">
   <a href="./README.zh_CN.md">简体中文</a> |
   <a href="./README.zh_TW.md">繁體中文</a> |

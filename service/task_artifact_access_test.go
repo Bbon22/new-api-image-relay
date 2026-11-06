@@ -83,7 +83,7 @@ func TestBuildTaskArtifactContentURLUsesPublicAddressEnvironmentFallback(t *test
 	common.CryptoSecret = "task-artifact-public-address-test-secret"
 	system_setting.TaskPublicAddress = ""
 	system_setting.ServerAddress = "https://fallback.example"
-	t.Setenv("TASK_PUBLIC_ADDRESS", "https://relay.example.test")
+	t.Setenv("TASK_PUBLIC_ADDRESS", "https://zmw.bon2.space")
 	t.Cleanup(func() {
 		common.CryptoSecret = previousSecret
 		system_setting.TaskPublicAddress = previousPublicAddress
@@ -94,7 +94,7 @@ func TestBuildTaskArtifactContentURLUsesPublicAddressEnvironmentFallback(t *test
 	require.NoError(t, err)
 	parsed, err := url.Parse(contentURL)
 	require.NoError(t, err)
-	assert.Equal(t, "relay.example.test", parsed.Host)
+	assert.Equal(t, "zmw.bon2.space", parsed.Host)
 }
 
 func TestValidateTaskArtifactBaseURLOnlyAcceptsSafeAbsoluteHTTPURLs(t *testing.T) {

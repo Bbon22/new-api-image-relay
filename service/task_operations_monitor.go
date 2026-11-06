@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	taskOpsAlertRecipient       = "978206830@qq.com"
 	taskOpsAlertCooldown        = 15 * time.Minute
 	taskOpsMonitorInterval      = time.Minute
 	taskOpsDailyReportHour      = 6
@@ -27,7 +28,6 @@ const (
 )
 
 var (
-	taskOpsAlertRecipient = strings.TrimSpace(os.Getenv("TASK_OPS_ALERT_RECIPIENT"))
 	taskOpsMonitorStarted atomic.Bool
 	taskQuerySlowCount    atomic.Int64
 	taskQuerySlowMaxMs    atomic.Int64
@@ -219,7 +219,7 @@ func checkBackupHealth(now int64, state *taskOpsAlertState) {
 }
 
 func sendTaskOpsAlert(state *taskOpsAlertState, subject, detail string) {
-	if state == nil || taskOpsAlertRecipient == "" {
+	if state == nil {
 		return
 	}
 	now := time.Now()
@@ -234,9 +234,6 @@ func sendTaskOpsAlert(state *taskOpsAlertState, subject, detail string) {
 }
 
 func sendTaskDailyReport(now time.Time) {
-	if taskOpsAlertRecipient == "" {
-		return
-	}
 	stats, err := model.GetImageTaskHealthStats(now.Add(-24*time.Hour).Unix(), now.Unix())
 	if err != nil {
 		sendTaskOpsAlert(&taskOpsAlertState{last: make(map[string]time.Time)}, "P1: 每日报告生成失败", err.Error())
